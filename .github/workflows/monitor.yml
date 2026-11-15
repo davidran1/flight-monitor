@@ -2,8 +2,8 @@ name: ✈️ Etihad Flight Monitor
 
 on:
   schedule:
-    # רץ אוטומטית בענן כל שעתיים (בפורמט UTC)
-    - cron: '0 */2 * * *'
+    # רץ אוטומטית בענן כל שעתיים (בדקה ה-20 למניעת עומסי שרתים של GitHub)
+    - cron: '20 */2 * * *'
   workflow_dispatch: # מאפשר הפעלה ידנית בלחיצת כפתור מ-GitHub
 
 permissions:
