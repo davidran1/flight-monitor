@@ -71,7 +71,8 @@ class FlightScanner:
         """
         Executes a scan cycle over the 151 refined combinations.
         Collects all new flights and price drops under MAX_PRICE_USD ($1,100).
-        Sends ONE single consolidated email if matching deals are found.
+        Sends ONE single consolidated email if matching deals are found,
+        including a summary table of the Top 10 existing flights in the database sorted by price.
         """
         date_pairs = generate_date_pairs(
             target_year=config.TARGET_YEAR,
@@ -94,7 +95,7 @@ class FlightScanner:
         print(f"⏳ משך שהות בפוקט: {config.MIN_STAY_DAYS}-{config.MAX_STAY_DAYS} ימים")
         print(f"⏱️ מקסימום זמן טיסה: עד {config.MAX_DURATION_HOURS} שעות לכל כיוון")
         print(f"💰 סינון מחיר מרבי: עד {config.MAX_PRICE_USD:.0f}$ בלבד")
-        print(f"📧 התראות: מייל מרוכז יחיד בסיום הסריקה לכל הטיסות הזולות שנמצאו")
+        print(f"📧 התראות: מייל מרוכז הכולל דילים חדשים + קישורים למאגר הקיים")
         print(f"🔢 סה\"כ קומבינציות תאריכים לסריקה: {len(date_pairs)}")
         print(f"==================================================\n")
 
@@ -139,8 +140,14 @@ class FlightScanner:
         stats = self.db.get_summary_stats()
 
         if new_deals:
-            print(f"\n📨 שולח מייל מרוכז אחד עם {len(new_deals)} טיסות מתחת ל-${config.MAX_PRICE_USD:.0f}...")
-            self.notifier.send_consolidated_alert(deals=new_deals, max_price_usd=config.MAX_PRICE_USD)
+            # Retrieve the Top 10 existing cheapest flights from the DB to include in the email
+            existing_cheapest = self.db.get_top_cheapest_flights(limit=10)
+            print(f"\n📨 שולח מייל מרוכז אחד עם {len(new_deals)} טיסות חדשות + טבלת 10 הטיסות הזולות הקיימות במאגר...")
+            self.notifier.send_consolidated_alert(
+                deals=new_deals,
+                max_price_usd=config.MAX_PRICE_USD,
+                existing_cheapest=existing_cheapest
+            )
         else:
             print(f"\nℹ️ לא נמצאו טיסות חדשות או ירידות מחיר מתחת ל-${config.MAX_PRICE_USD:.0f} בסבב זה. (לא נשלח מייל למניעת ספאם)")
 

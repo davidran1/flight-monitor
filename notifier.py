@@ -62,22 +62,29 @@ class EmailNotifier:
             print(f"  [Email Error] שגיאה בשליחת מייל: {e}")
             return False
 
-    def send_consolidated_alert(self, deals: List[Dict[str, Any]], max_price_usd: float) -> bool:
+    def send_consolidated_alert(
+        self,
+        deals: List[Dict[str, Any]],
+        max_price_usd: float,
+        existing_cheapest: Optional[List[Dict[str, Any]]] = None
+    ) -> bool:
         """
-        Sends ONE consolidated email containing all newly discovered flights and price drops
-        under the price ceiling found in this specific scan run.
+        Sends ONE consolidated email containing:
+        1. All newly discovered flights / price drops under max_price_usd.
+        2. The Top cheapest existing flights currently recorded in the database, sorted by price.
+        3. Direct booking links for each flight.
         """
         if not deals:
             return False
 
-        # Sort deals by price ascending
         deals = sorted(deals, key=lambda d: d["price"])
         lowest_price = deals[0]["price"]
         count = len(deals)
 
         subject = f"✈️ התראת טיסות איתיחאד: נמצאו {count} טיסות חדשות מתחת ל-$1,100! (החל מ-${lowest_price:,.0f})"
 
-        rows_html = ""
+        # 1. Build New Deals Rows
+        new_deals_rows_html = ""
         for i, d in enumerate(deals, 1):
             f = d["flight"]
             alert_type = d["alert_type"]
@@ -100,7 +107,7 @@ class EmailNotifier:
                 price_badge = f'<span style="font-size: 18px; font-weight: 800; color: #047857;">${f["price"]:,.0f}</span>'
                 tag = '<span style="background:#d1fae5; color:#047857; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:bold;">טיסה חדשה</span>'
 
-            rows_html += f"""
+            new_deals_rows_html += f"""
             <tr style="border-bottom: 1px solid #e2e8f0; background: {'#ffffff' if i%2!=0 else '#f8fafc'};">
               <td style="padding: 12px; font-weight: bold; text-align: center;">#{i}</td>
               <td style="padding: 12px;">
@@ -125,6 +132,63 @@ class EmailNotifier:
             </tr>
             """
 
+        # 2. Build Existing Top Database Flights Section
+        existing_section_html = ""
+        if existing_cheapest:
+            existing_rows_html = ""
+            for j, ef in enumerate(existing_cheapest, 1):
+                edep_dt = datetime.strptime(ef['departure_date'], "%Y-%m-%d")
+                eret_dt = datetime.strptime(ef['return_date'], "%Y-%m-%d")
+                edep_day = HEBREW_WEEKDAYS.get(edep_dt.weekday(), "")
+                eret_day = HEBREW_WEEKDAYS.get(eret_dt.weekday(), "")
+
+                existing_rows_html += f"""
+                <tr style="border-bottom: 1px solid #e2e8f0; background: {'#ffffff' if j%2!=0 else '#f8fafc'};">
+                  <td style="padding: 10px; font-weight: bold; text-align: center;">{j}</td>
+                  <td style="padding: 10px; font-size: 13px;">
+                    יום {edep_day}, {ef['departure_date']} ➔ יום {eret_day}, {ef['return_date']}
+                    <span style="color:#64748b;">({ef['stay_days']} ימים)</span>
+                  </td>
+                  <td style="padding: 10px; font-size: 12px; color:#475569;">
+                    הלוך: {ef['outbound_duration_hours']:.1f}h | חזור: {ef['inbound_duration_hours']:.1f}h
+                  </td>
+                  <td style="padding: 10px; font-size: 16px; font-weight: bold; color: #047857; text-align: center;">
+                    ${ef['lowest_price']:,.0f}
+                  </td>
+                  <td style="padding: 10px; text-align: center;">
+                    <a href="{ef.get('booking_link', 'https://www.etihad.com')}" target="_blank"
+                       style="display: inline-block; background-color: #2563eb; color: #ffffff !important; padding: 6px 12px; border-radius: 4px; font-size: 12px; text-decoration: none; font-weight: bold;">
+                      הזמנה ➔
+                    </a>
+                  </td>
+                </tr>
+                """
+
+            existing_section_html = f"""
+            <div style="margin-top: 36px; padding-top: 24px; border-top: 2px dashed #cbd5e1;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <h3 style="margin: 0; font-size: 18px; color: #0f172a;">📊 10 הטיסות הזולות ביותר הקיימות כרגע במאגר:</h3>
+              </div>
+              <p style="margin: 0 0 12px 0; color: #64748b; font-size: 13px;">
+                כל הטיסות ממוינות לפי המחיר הנמוך ביותר שנרשם במסד הנתונים:
+              </p>
+              <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                <thead>
+                  <tr style="background: #f1f5f9;">
+                    <th style="padding: 8px; text-align: center;">#</th>
+                    <th style="padding: 8px;">תאריכים ושהות</th>
+                    <th style="padding: 8px;">זמני טיסה</th>
+                    <th style="padding: 8px; text-align: center;">מחיר שנשמר</th>
+                    <th style="padding: 8px; text-align: center;">קישור</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {existing_rows_html}
+                </tbody>
+              </table>
+            </div>
+            """
+
         html_content = f"""<!DOCTYPE html>
 <html dir="rtl" lang="he">
 <head>
@@ -146,18 +210,17 @@ class EmailNotifier:
     <div class="header">
       <span class="badge">התראת טיסות חדשות ומוזלות</span>
       <h1 style="margin: 12px 0 6px 0; font-size: 22px;">איתיחאד: תל אביב ⇄ פוקט מתחת ל-${max_price_usd:,.0f}</h1>
-      <p style="margin:0; opacity:0.85; font-size:14px;">ינואר - פברואר • ללא שישי ושבת • עד 15 שעות טיסה</p>
+      <p style="margin:0; opacity:0.85; font-size:14px;">ינואר - 7 בפברואר • שהות 15-22 יום • ללא שישי ושבת • עד 15 שעות טיסה</p>
     </div>
 
     <div class="content">
       <div class="info-bar">
         ⚡ <strong>תוצאות סבב הסריקה האחרון:</strong><br>
-        • זוהו <strong>{count} טיסות חדשות / צניחות מחיר</strong> שעומדות בקריטריונים שלך.<br>
-        • מחיר כולל: <strong>לא יותר מ-${max_price_usd:,.0f}</strong> (החל מ-<strong style="color:#047857;">${lowest_price:,.0f}</strong>).<br>
-        • ללא ימי שישי ושבת, זמן טיסה עד 15 שעות בלבד.<br>
-        • כל האפשרויות מסודרות למטה מהמחיר הנמוך ביותר לגבוה ביותר.
+        • זוהו <strong>{count} טיסות חדשות / צניחות מחיר</strong> מתחת ל-${max_price_usd:,.0f} (החל מ-<strong style="color:#047857;">${lowest_price:,.0f}</strong>).<br>
+        • ממוינות למטה מהמחיר הנמוך ביותר לגבוה ביותר.
       </div>
 
+      <h3 style="margin: 0 0 10px 0; font-size: 18px; color: #0f172a;">🔥 הטיסות החדשות שהתגלו בסבב זה:</h3>
       <table>
         <thead>
           <tr>
@@ -169,19 +232,24 @@ class EmailNotifier:
           </tr>
         </thead>
         <tbody>
-          {rows_html}
+          {new_deals_rows_html}
         </tbody>
       </table>
+
+      {existing_section_html}
     </div>
 
     <div class="footer">
-      מערכת ניטור טיסות איתיחאד • נסרק בענן בתאריך {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}
+      מערכת ניטור טיסות איתיחאד • נסרק בענן בתאריך {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}<br>
+      <a href="https://github.com/davidran1/flight-monitor" target="_blank" style="color: #2563eb; text-decoration: none; margin-top: 4px; display: inline-block;">
+        🔗 צפייה במאגר הפרויקט ב-GitHub
+      </a>
     </div>
   </div>
 </body>
 </html>"""
 
-        plain_text = f"נמצאו {count} טיסות איתיחאד מתחת ל-${max_price_usd:,.0f} (החל מ-${lowest_price:,.0f}). פתח את המייל לצפייה בפרטים."
+        plain_text = f"נמצאו {count} טיסות איתיחאד מתחת ל-${max_price_usd:,.0f} (החל מ-${lowest_price:,.0f}). פתח את המייל לצפייה בפרטים ובמאגר המלא."
         return self._send_mime(subject, plain_text, html_content)
 
     def send_test_email(self) -> bool:
@@ -203,4 +271,24 @@ class EmailNotifier:
             "alert_type": "NEW_FLIGHT",
             "price": 1050.0
         }
-        return self.send_consolidated_alert([sample_deal], max_price_usd=1100.0)
+        sample_existing = [
+            {
+                "departure_date": "2027-01-17",
+                "return_date": "2027-02-02",
+                "stay_days": 16,
+                "outbound_duration_hours": 12.5,
+                "inbound_duration_hours": 12.7,
+                "lowest_price": 1400.0,
+                "booking_link": "https://www.etihad.com"
+            },
+            {
+                "departure_date": "2027-01-18",
+                "return_date": "2027-02-03",
+                "stay_days": 16,
+                "outbound_duration_hours": 12.5,
+                "inbound_duration_hours": 12.7,
+                "lowest_price": 1400.0,
+                "booking_link": "https://www.etihad.com"
+            }
+        ]
+        return self.send_consolidated_alert([sample_deal], max_price_usd=1100.0, existing_cheapest=sample_existing)
