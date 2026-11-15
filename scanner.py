@@ -1,6 +1,6 @@
 import time
 import random
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 from typing import List, Tuple, Dict, Any
 
 import config
@@ -15,11 +15,13 @@ def generate_date_pairs(
     max_stay: int,
     dep_step: int = 1,
     stay_step: int = 1,
-    exclude_weekdays: List[int] = None
+    exclude_weekdays: List[int] = None,
+    latest_departure_date: str = None
 ) -> List[Tuple[str, str, int]]:
     """
     Generates all valid (departure_date_str, return_date_str, stay_days) pairs
-    strictly excluding Friday (4) and Saturday (5) for both departure and return.
+    strictly excluding Friday (4) and Saturday (5) for both departure and return,
+    and limiting departures up to latest_departure_date (e.g. 2027-02-07).
     """
     if exclude_weekdays is None:
         exclude_weekdays = [4, 5]
@@ -27,15 +29,18 @@ def generate_date_pairs(
     pairs = []
     current_date = date(target_year, target_months[0], 1)
     
-    last_month = target_months[-1]
-    if last_month == 2:
-        is_leap = (target_year % 4 == 0 and target_year % 100 != 0) or (target_year % 400 == 0)
-        end_date = date(target_year, 2, 29 if is_leap else 28)
+    if latest_departure_date:
+        end_date = datetime.strptime(latest_departure_date, "%Y-%m-%d").date()
     else:
-        end_date = date(target_year, last_month, 31)
+        last_month = target_months[-1]
+        if last_month == 2:
+            is_leap = (target_year % 4 == 0 and target_year % 100 != 0) or (target_year % 400 == 0)
+            end_date = date(target_year, 2, 29 if is_leap else 28)
+        else:
+            end_date = date(target_year, last_month, 31)
 
     while current_date <= end_date:
-        if current_date.month in target_months and current_date.weekday() not in exclude_weekdays:
+        if current_date.weekday() not in exclude_weekdays:
             for stay in range(min_stay, max_stay + 1, stay_step):
                 ret_date = current_date + timedelta(days=stay)
                 if ret_date.weekday() not in exclude_weekdays:
@@ -64,10 +69,9 @@ class FlightScanner:
 
     def run_scan(self, max_pairs: int = None) -> Dict[str, Any]:
         """
-        Executes a scan cycle.
+        Executes a scan cycle over the 151 refined combinations.
         Collects all new flights and price drops under MAX_PRICE_USD ($1,100).
-        At the end of the scan, sends ONE single consolidated email with all matching deals.
-        If no deals <= $1,100 are found, no email is sent (zero spam).
+        Sends ONE single consolidated email if matching deals are found.
         """
         date_pairs = generate_date_pairs(
             target_year=config.TARGET_YEAR,
@@ -76,15 +80,16 @@ class FlightScanner:
             max_stay=config.MAX_STAY_DAYS,
             dep_step=config.DEPARTURE_STEP_DAYS,
             stay_step=config.STAY_STEP_DAYS,
-            exclude_weekdays=config.EXCLUDE_WEEKDAYS
+            exclude_weekdays=config.EXCLUDE_WEEKDAYS,
+            latest_departure_date=config.LATEST_DEPARTURE_DATE
         )
 
         if max_pairs:
             date_pairs = date_pairs[:max_pairs]
 
         print(f"\n==================================================")
-        print(f"🚀 סריקת טיסות איתיחאד: TLV ➔ HKT")
-        print(f"📅 חודשים: ינואר-פברואר {config.TARGET_YEAR}")
+        print(f"🚀 סריקת טיסות איתיחאד: TLV ➔ HKT (ממוקד ויעיל)")
+        print(f"📅 חלון יציאות: מ-1 בינואר עד {config.LATEST_DEPARTURE_DATE}")
         print(f"🚫 מגבלה: ללא טיסות בשישי ושבת (בהלוך ובחזור)")
         print(f"⏳ משך שהות בפוקט: {config.MIN_STAY_DAYS}-{config.MAX_STAY_DAYS} ימים")
         print(f"⏱️ מקסימום זמן טיסה: עד {config.MAX_DURATION_HOURS} שעות לכל כיוון")
@@ -106,7 +111,6 @@ class FlightScanner:
                 total_checked += 1
                 is_new, alert_type, old_price = self.db.save_or_update_flight(flight)
 
-                # Check if flight qualifies for user alert (Price <= MAX_PRICE_USD)
                 price = flight["price"]
                 if price <= config.MAX_PRICE_USD:
                     if alert_type == "NEW_FLIGHT":
@@ -134,7 +138,6 @@ class FlightScanner:
 
         stats = self.db.get_summary_stats()
 
-        # Send ONE consolidated email if new matching deals were found
         if new_deals:
             print(f"\n📨 שולח מייל מרוכז אחד עם {len(new_deals)} טיסות מתחת ל-${config.MAX_PRICE_USD:.0f}...")
             self.notifier.send_consolidated_alert(deals=new_deals, max_price_usd=config.MAX_PRICE_USD)

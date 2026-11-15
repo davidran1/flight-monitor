@@ -12,13 +12,16 @@ MAX_DURATION_HOURS = float(os.getenv("MAX_DURATION_HOURS", "15.0"))
 # Price Ceiling Filter (Alert only for flights <= this price)
 MAX_PRICE_USD = float(os.getenv("MAX_PRICE_USD", "1100.0"))
 
-# Stay Duration & Dates (Every single day: 15 to 25)
+# Stay Duration: 15 to 22 days
 MIN_STAY_DAYS = int(os.getenv("MIN_STAY_DAYS", "15"))
-MAX_STAY_DAYS = int(os.getenv("MAX_STAY_DAYS", "25"))
-TARGET_MONTHS = [int(m.strip()) for m in os.getenv("TARGET_MONTHS", "1,2").split(",")]  # January, February
-TARGET_YEAR = int(os.getenv("TARGET_YEAR", "2027"))  # Upcoming Jan-Feb
+MAX_STAY_DAYS = int(os.getenv("MAX_STAY_DAYS", "22"))
 
-# Step 1 = Every possible day!
+# Departure window: January 1 up to February 7
+TARGET_YEAR = int(os.getenv("TARGET_YEAR", "2027"))
+TARGET_MONTHS = [1, 2]
+LATEST_DEPARTURE_DATE = os.getenv("LATEST_DEPARTURE_DATE", f"{TARGET_YEAR}-02-07")
+
+# Step 1 = Every possible day
 DEPARTURE_STEP_DAYS = int(os.getenv("DEPARTURE_STEP_DAYS", "1"))
 STAY_STEP_DAYS = int(os.getenv("STAY_STEP_DAYS", "1"))
 

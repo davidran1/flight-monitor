@@ -35,8 +35,8 @@ jobs:
           MAX_DURATION_HOURS: 15.0
           MAX_PRICE_USD: "1100.0"
           MIN_STAY_DAYS: 15
-          MAX_STAY_DAYS: 25
-          TARGET_MONTHS: 1,2
+          MAX_STAY_DAYS: 22
+          LATEST_DEPARTURE_DATE: "2027-02-07"
           TARGET_YEAR: 2027
           DEPARTURE_STEP_DAYS: 1
           STAY_STEP_DAYS: 1
