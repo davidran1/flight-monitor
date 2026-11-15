@@ -1,0 +1,62 @@
+name: ✈️ Etihad Flight Monitor
+
+on:
+  schedule:
+    # רץ אוטומטית בענן כל שעתיים (בפורמט UTC)
+    - cron: '0 */2 * * *'
+  workflow_dispatch: # מאפשר הפעלה ידנית בלחיצת כפתור מ-GitHub
+
+permissions:
+  contents: write # נדרש לשמירת מסד הנתונים בחזרה למאגר
+
+jobs:
+  check-flights:
+    runs-on: ubuntu-latest
+    steps:
+      - name: הורדת הקוד
+        uses: actions/checkout@v4
+
+      - name: התקנת Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: התקנת תלויות
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: הרצת סריקת טיסות והתראות
+        env:
+          ORIGIN: TLV
+          DESTINATION: HKT
+          AIRLINE_CODE: EY
+          MAX_DURATION_HOURS: 15.0
+          MIN_STAY_DAYS: 15
+          MAX_STAY_DAYS: 25
+          TARGET_MONTHS: 1,2
+          TARGET_YEAR: 2027
+          DEPARTURE_STEP_DAYS: 1
+          STAY_STEP_DAYS: 1
+          EMAIL_ENABLED: "true"
+          SMTP_HOST: smtp.gmail.com
+          SMTP_PORT: 587
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+        run: |
+          # אם מסד הנתונים כבר קיים, נריץ במצב זיהוי שינויים והתראות מיידיות
+          python -c "
+          from scanner import FlightScanner
+          s = FlightScanner(use_mock=False)
+          s.run_scan(silent_baseline=False)
+          "
+
+      - name: שמירת מסד הנתונים המעודכן במאגר
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add flights.db
+          git diff --quiet && git diff --staged --quiet || (git commit -m "🤖 עדכון אוטומטי של מאגר הטיסות והמחירים" && git push)
+
