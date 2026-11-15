@@ -62,12 +62,12 @@ class FlightScanner:
         )
         self.live_client = GoogleFlightsLiveClient() if not use_mock else None
 
-    def run_scan(self, silent_baseline: bool = True, max_pairs: int = None) -> Dict[str, Any]:
+    def run_scan(self, max_pairs: int = None) -> Dict[str, Any]:
         """
-        Executes scan cycle.
-        If silent_baseline=True: Saves all flights quietly into SQLite DB,
-        and at the end sends ONE single consolidated digest email with the cheapest flights.
-        If silent_baseline=False (watch mode): Sends immediate alert for any newly added flight or price drop.
+        Executes a scan cycle.
+        Collects all new flights and price drops under MAX_PRICE_USD ($1,100).
+        At the end of the scan, sends ONE single consolidated email with all matching deals.
+        If no deals <= $1,100 are found, no email is sent (zero spam).
         """
         date_pairs = generate_date_pairs(
             target_year=config.TARGET_YEAR,
@@ -88,13 +88,13 @@ class FlightScanner:
         print(f"🚫 מגבלה: ללא טיסות בשישי ושבת (בהלוך ובחזור)")
         print(f"⏳ משך שהות בפוקט: {config.MIN_STAY_DAYS}-{config.MAX_STAY_DAYS} ימים")
         print(f"⏱️ מקסימום זמן טיסה: עד {config.MAX_DURATION_HOURS} שעות לכל כיוון")
-        print(f"📧 מצב התראות: {'דוח מרוכז בסיום הסריקה' if silent_baseline else 'התראה מיידית על כל שינוי/טיסה חדשה'}")
+        print(f"💰 סינון מחיר מרבי: עד {config.MAX_PRICE_USD:.0f}$ בלבד")
+        print(f"📧 התראות: מייל מרוכז יחיד בסיום הסריקה לכל הטיסות הזולות שנמצאו")
         print(f"🔢 סה\"כ קומבינציות תאריכים לסריקה: {len(date_pairs)}")
         print(f"==================================================\n")
 
         total_checked = 0
-        new_flights_count = 0
-        price_drops_count = 0
+        new_deals = []
 
         for i, (dep_date, ret_date, stay) in enumerate(date_pairs, 1):
             print(f"[{i}/{len(date_pairs)}] בודק {dep_date} ➔ {ret_date} ({stay} ימים)...", end=" ", flush=True)
@@ -106,49 +106,53 @@ class FlightScanner:
                 total_checked += 1
                 is_new, alert_type, old_price = self.db.save_or_update_flight(flight)
 
-                if alert_type == "NEW_FLIGHT":
-                    new_flights_count += 1
-                    if not silent_baseline:
-                        print(f"  ✨ [טיסה חדשה!] מחיר: {flight['currency']}{flight['price']:.0f} | הלוך: {flight['outbound_duration_hours']}h | חזור: {flight['inbound_duration_hours']}h")
-                        self.notifier.send_alert(flight, "NEW_FLIGHT")
-                        self.db.log_alert(flight["flight_key"], "NEW_FLIGHT", None, flight["price"])
+                # Check if flight qualifies for user alert (Price <= MAX_PRICE_USD)
+                price = flight["price"]
+                if price <= config.MAX_PRICE_USD:
+                    if alert_type == "NEW_FLIGHT":
+                        print(f"  ✨ [טיסה חדשה מתחת לרף!] מחיר: ${price:.0f} | הלוך: {flight['outbound_duration_hours']}h | חזור: {flight['inbound_duration_hours']}h")
+                        new_deals.append({
+                            "flight": flight,
+                            "alert_type": "NEW_FLIGHT",
+                            "price": price,
+                            "old_price": None
+                        })
+                        self.db.log_alert(flight["flight_key"], "NEW_FLIGHT", None, price)
 
-                elif alert_type == "PRICE_DROP":
-                    price_drops_count += 1
-                    print(f"  📉 [צניחת מחיר!] ירד מ-{old_price:.0f} ל-{flight['price']:.0f} {flight['currency']}!")
-                    self.notifier.send_alert(flight, "PRICE_DROP", old_price)
-                    self.db.log_alert(flight["flight_key"], "PRICE_DROP", old_price, flight["price"])
+                    elif alert_type == "PRICE_DROP":
+                        print(f"  📉 [צניחת מחיר מתחת לרף!] ירד מ-${old_price:.0f} ל-${price:.0f}!")
+                        new_deals.append({
+                            "flight": flight,
+                            "alert_type": "PRICE_DROP",
+                            "price": price,
+                            "old_price": old_price
+                        })
+                        self.db.log_alert(flight["flight_key"], "PRICE_DROP", old_price, price)
 
             if not self.use_mock:
                 time.sleep(0.8)
 
         stats = self.db.get_summary_stats()
 
-        # If silent baseline was requested, send the consolidated digest email now
-        if silent_baseline:
-            top_cheapest = self.db.get_top_cheapest_flights(limit=15)
-            if top_cheapest:
-                print("\n📨 שולח דוח מרוכז של הטיסות הזולות ביותר למייל...")
-                self.notifier.send_digest_email(
-                    top_flights=top_cheapest,
-                    total_scanned=stats["total_flights"],
-                    min_price=stats["min_price"]
-                )
+        # Send ONE consolidated email if new matching deals were found
+        if new_deals:
+            print(f"\n📨 שולח מייל מרוכז אחד עם {len(new_deals)} טיסות מתחת ל-${config.MAX_PRICE_USD:.0f}...")
+            self.notifier.send_consolidated_alert(deals=new_deals, max_price_usd=config.MAX_PRICE_USD)
+        else:
+            print(f"\nℹ️ לא נמצאו טיסות חדשות או ירידות מחיר מתחת ל-${config.MAX_PRICE_USD:.0f} בסבב זה. (לא נשלח מייל למניעת ספאם)")
 
         summary = {
             "total_pairs_checked": len(date_pairs),
             "total_flights_found": total_checked,
-            "new_flights": new_flights_count,
-            "price_drops": price_drops_count,
+            "matching_deals": len(new_deals),
             "db_stats": stats
         }
 
         print(f"\n✅ סריקה הסתיימה בהצלחה!")
-        print(f"  - טיסות חדשות שנוספו למאגר: {new_flights_count}")
-        print(f"  - ירידות מחיר שזוהו: {price_drops_count}")
+        print(f"  - טיסות רלוונטיות מתחת ל-${config.MAX_PRICE_USD:.0f} שנמצאו בסבב זה: {len(new_deals)}")
         print(f"  - סה\"כ טיסות במאגר: {stats['total_flights']}")
         if stats['min_price']:
-            print(f"  - המחיר הנמוך ביותר במאגר: {stats['min_price']:.0f} USD")
+            print(f"  - המחיר הנמוך ביותר במאגר: ${stats['min_price']:.0f}")
 
         return summary
 
@@ -182,7 +186,7 @@ class FlightScanner:
         flights = []
         out_flight, out_dur, out_sum = random.choice(outbound_options)
         in_flight, in_dur, in_sum = random.choice(inbound_options)
-        base_price = round(random.uniform(720, 1150), 0)
+        base_price = round(random.uniform(920, 1180), 0)
 
         flight_key = f"TLV-HKT_{dep_date}_{ret_date}_{out_flight}_{in_flight}"
         etihad_link = f"https://www.etihad.com/en-il/book?origin=TLV&destination=HKT&departureDate={dep_date}&returnDate={ret_date}&cabin=ECONOMY&adults=1"

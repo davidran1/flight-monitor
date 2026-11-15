@@ -9,6 +9,9 @@ DESTINATION = os.getenv("DESTINATION", "HKT")
 AIRLINE_CODE = os.getenv("AIRLINE_CODE", "EY")  # EY = Etihad Airways
 MAX_DURATION_HOURS = float(os.getenv("MAX_DURATION_HOURS", "15.0"))
 
+# Price Ceiling Filter (Alert only for flights <= this price)
+MAX_PRICE_USD = float(os.getenv("MAX_PRICE_USD", "1100.0"))
+
 # Stay Duration & Dates (Every single day: 15 to 25)
 MIN_STAY_DAYS = int(os.getenv("MIN_STAY_DAYS", "15"))
 MAX_STAY_DAYS = int(os.getenv("MAX_STAY_DAYS", "25"))
