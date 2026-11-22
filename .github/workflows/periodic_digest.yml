@@ -1,0 +1,48 @@
+name: 📊 Etihad Periodic Status Digest (Every 3 Days)
+
+on:
+  schedule:
+    # רץ אוטומטית בענן כל 3 ימים בשעה 08:00 UTC (10:00 שעון ישראל)
+    - cron: '0 8 */3 * *'
+  workflow_dispatch: # מאפשר הפעלה ידנית בלחיצת כפתור מ-GitHub
+
+permissions:
+  contents: write
+
+jobs:
+  send-digest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: הורדת הקוד
+        uses: actions/checkout@v4
+
+      - name: התקנת Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: התקנת תלויות
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: שליחת דוח המצב התקופתי
+        env:
+          ORIGIN: TLV
+          DESTINATION: HKT
+          AIRLINE_CODE: EY
+          MAX_DURATION_HOURS: 15.0
+          MAX_PRICE_USD: "1100.0"
+          MIN_STAY_DAYS: 15
+          MAX_STAY_DAYS: 22
+          LATEST_RETURN_DATE: "2027-03-07"
+          TARGET_YEAR: 2027
+          EMAIL_ENABLED: "true"
+          SMTP_HOST: smtp.gmail.com
+          SMTP_PORT: 587
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+        run: |
+          python main.py --digest

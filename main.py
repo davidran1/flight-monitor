@@ -15,11 +15,11 @@ def print_banner():
   ==============================================================
   חברה: Etihad Airways (EY) | מסלול: תל אביב ⇄ פוקט
   משך טיסה: מקסימום 15 שעות לכל כיוון (קונקשן באבו דאבי)
-  סינון מחיר מרבי: עד {config.MAX_PRICE_USD:.0f}$ בלבד!
-  חלון זמן: חודשים ינואר ופברואר
-  משך שהות: 15 עד 25 ימים בפוקט (כל קומבינציה אפשרית)
-  הגבלה מיוחדת: ללא טיסות בשישי ושבת (בהלוך ובחזור)
-  התראות: מייל מרוכז אחד בלבד בסיום הסריקה לכל הדילים שנמצאו
+  סינון מחיר מרבי להתראה: עד {config.MAX_PRICE_USD:.0f}$ בלבד!
+  חלון יציאות: ינואר ופברואר (חזרה עד 7 במרץ 2027)
+  משך שהות: 15 עד 22 ימים בפוקט
+  הגבלה: ללא טיסות בשישי ושבת (בהלוך ובחזור)
+  התראות: מייל מרוכז לדילים חדשים + דוח מצב תקופתי כל 3 ימים
   ==============================================================
     """
     print(banner)
@@ -33,7 +33,7 @@ def show_summary():
     print(f"סה\"כ התראות שנשלחו עד כה: {stats['total_alerts']}")
     if stats['total_flights'] > 0:
         print(f"טווח מחירים נוכחי: {stats['min_price']:.0f}$ - {stats['max_price']:.0f}$")
-        print(f"\n🏆 הטיסות המשתלמות ביותר (עד {config.MAX_PRICE_USD:.0f}$ | זמן ≤ 15 שעות | ללא שישי-שבת):")
+        print(f"\n🏆 הטיסות המשתלמות ביותר (זמן ≤ 15 שעות | ללא שישי-שבת):")
         top_list = db.get_top_cheapest_flights(limit=15)
         for i, f in enumerate(top_list, 1):
             star = "🔥" if f['lowest_price'] <= config.MAX_PRICE_USD else "  "
@@ -41,6 +41,36 @@ def show_summary():
     else:
         print("טרם נסרקו טיסות. הרץ: python main.py --scan")
     print("------------------------------------\n")
+
+def send_digest_now():
+    """
+    Sends the periodic status report of the top cheapest flights currently in the database.
+    """
+    db = FlightDatabase(config.DB_PATH)
+    stats = db.get_summary_stats()
+    top_flights = db.get_top_cheapest_flights(limit=15)
+    
+    if not top_flights:
+        print("⚠️ מאגר הנתונים ריק. בצע סריקה תחילה.")
+        return False
+
+    notifier = EmailNotifier(
+        smtp_host=config.SMTP_HOST,
+        smtp_port=config.SMTP_PORT,
+        smtp_user=config.SMTP_USER,
+        smtp_password=config.SMTP_PASSWORD,
+        email_to=config.EMAIL_TO,
+        enabled=True
+    )
+    print(f"\n📨 שולח דוח מצב תקופתי עם {len(top_flights)} הטיסות הזולות ביותר ל-{notifier.email_to}...")
+    success = notifier.send_periodic_status_digest(
+        top_flights=top_flights,
+        total_scanned=stats["total_flights"],
+        min_price=stats["min_price"]
+    )
+    if success:
+        print("✅ דוח המצב התקופתי נשלח בהצלחה למייל!")
+    return success
 
 def test_email():
     print("\n📧 בודק חיבור לשליחת מייל...")
@@ -56,9 +86,27 @@ def test_email():
         print("⚠️ פרטי ה-SMTP חסרים בקובץ .env!")
         return
 
-    success = notifier.send_test_email()
+    sample_deal = {
+        "flight": {
+            "origin": "TLV",
+            "destination": "HKT",
+            "departure_date": "2027-01-25",
+            "return_date": "2027-02-09",
+            "stay_days": 15,
+            "outbound_flight_nums": "EY-TLV➔AUH + EY-AUH➔HKT",
+            "inbound_flight_nums": "EY-HKT➔AUH + EY-AUH➔TLV",
+            "outbound_duration_hours": 12.5,
+            "inbound_duration_hours": 13.0,
+            "price": 1139.0,
+            "currency": "USD",
+            "booking_link": "https://www.etihad.com"
+        },
+        "alert_type": "NEW_FLIGHT",
+        "price": 1139.0
+    }
+    success = notifier.send_consolidated_alert([sample_deal], max_price_usd=config.MAX_PRICE_USD)
     if success:
-        print(f"✅ מייל בדיקה מרוכז נשלח בהצלחה לכתובת: {notifier.email_to}")
+        print(f"✅ מייל בדיקה נשלח בהצלחה לכתובת: {notifier.email_to}")
     else:
         print("❌ שליחת המייל נכשלה. בדוק את ההגדרות והסיסמה.")
 
@@ -86,7 +134,8 @@ def watch_mode(interval_minutes: int, use_mock: bool):
 
 def main():
     parser = argparse.ArgumentParser(description="Etihad Airways Flight Monitor TLV <-> HKT")
-    parser.add_argument("--scan", action="store_true", help="בצע סריקה מלאה של כל קומבינציות ינואר-פברואר (מייל מרוכז אם נמצאו טיסות <= 1,100$)")
+    parser.add_argument("--scan", action="store_true", help="בצע סריקה מלאה של כל 189 הקומבינציות (מייל מרוכז אם נמצאו טיסות <= 1,100$)")
+    parser.add_argument("--digest", action="store_true", help="שלח מיידית את דוח המצב התקופתי עם הטיסות הזולות ביותר במאגר")
     parser.add_argument("--watch", action="store_true", help="הפעל ניטור רציף תמידי ברקע לזיהוי טיסות חדשות וירידות מחיר")
     parser.add_argument("--interval", type=int, default=config.SCAN_INTERVAL_MINUTES, help="מרווח זמן בין סריקות במצב watch בדקות")
     parser.add_argument("--test-mock", action="store_true", help="הרץ סריקת הדמיה לבדיקת המערכת")
@@ -96,12 +145,14 @@ def main():
     args = parser.parse_args()
     print_banner()
 
-    if args.summary:
+    if args.digest:
+        send_digest_now()
+    elif args.summary:
         show_summary()
     elif args.test_email:
         test_email()
     elif args.test_mock:
-        print("🧪 הרצת סימולציה (Mock Mode) - חיפוש טיסות מתחת ל-1,100$...")
+        print("🧪 הרצת סימולציה (Mock Mode)...")
         scanner = FlightScanner(use_mock=True)
         scanner.run_scan()
         show_summary()
