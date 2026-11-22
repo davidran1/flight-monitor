@@ -16,12 +16,12 @@ def generate_date_pairs(
     dep_step: int = 1,
     stay_step: int = 1,
     exclude_weekdays: List[int] = None,
-    latest_departure_date: str = None
+    latest_return_date: str = None
 ) -> List[Tuple[str, str, int]]:
     """
     Generates all valid (departure_date_str, return_date_str, stay_days) pairs
     strictly excluding Friday (4) and Saturday (5) for both departure and return,
-    and limiting departures up to latest_departure_date (e.g. 2027-02-07).
+    and ensuring flights do NOT return after latest_return_date (2027-03-07).
     """
     if exclude_weekdays is None:
         exclude_weekdays = [4, 5]
@@ -29,20 +29,18 @@ def generate_date_pairs(
     pairs = []
     current_date = date(target_year, target_months[0], 1)
     
-    if latest_departure_date:
-        end_date = datetime.strptime(latest_departure_date, "%Y-%m-%d").date()
-    else:
-        last_month = target_months[-1]
-        if last_month == 2:
-            is_leap = (target_year % 4 == 0 and target_year % 100 != 0) or (target_year % 400 == 0)
-            end_date = date(target_year, 2, 29 if is_leap else 28)
-        else:
-            end_date = date(target_year, last_month, 31)
+    latest_ret_dt = datetime.strptime(latest_return_date, "%Y-%m-%d").date() if latest_return_date else None
 
-    while current_date <= end_date:
+    while True:
+        # If even minimum stay exceeds latest return date, stop
+        if latest_ret_dt and current_date + timedelta(days=min_stay) > latest_ret_dt:
+            break
+
         if current_date.weekday() not in exclude_weekdays:
             for stay in range(min_stay, max_stay + 1, stay_step):
                 ret_date = current_date + timedelta(days=stay)
+                if latest_ret_dt and ret_date > latest_ret_dt:
+                    continue
                 if ret_date.weekday() not in exclude_weekdays:
                     pairs.append((
                         current_date.strftime("%Y-%m-%d"),
@@ -69,7 +67,7 @@ class FlightScanner:
 
     def run_scan(self, max_pairs: int = None) -> Dict[str, Any]:
         """
-        Executes a scan cycle over the 151 refined combinations.
+        Executes a scan cycle over the 189 combinations (Option A: return <= 2027-03-07).
         Collects all new flights and price drops under MAX_PRICE_USD ($1,100).
         Sends ONE single consolidated email if matching deals are found,
         including a summary table of the Top 10 existing flights in the database sorted by price.
@@ -82,15 +80,15 @@ class FlightScanner:
             dep_step=config.DEPARTURE_STEP_DAYS,
             stay_step=config.STAY_STEP_DAYS,
             exclude_weekdays=config.EXCLUDE_WEEKDAYS,
-            latest_departure_date=config.LATEST_DEPARTURE_DATE
+            latest_return_date=config.LATEST_RETURN_DATE
         )
 
         if max_pairs:
             date_pairs = date_pairs[:max_pairs]
 
         print(f"\n==================================================")
-        print(f"🚀 סריקת טיסות איתיחאד: TLV ➔ HKT (ממוקד ויעיל)")
-        print(f"📅 חלון יציאות: מ-1 בינואר עד {config.LATEST_DEPARTURE_DATE}")
+        print(f"🚀 סריקת טיסות איתיחאד: TLV ➔ HKT (אפשרות א' - חזרה עד 07/03/2027)")
+        print(f"📅 חלון חזרה: לא יאוחר מ-{config.LATEST_RETURN_DATE}")
         print(f"🚫 מגבלה: ללא טיסות בשישי ושבת (בהלוך ובחזור)")
         print(f"⏳ משך שהות בפוקט: {config.MIN_STAY_DAYS}-{config.MAX_STAY_DAYS} ימים")
         print(f"⏱️ מקסימום זמן טיסה: עד {config.MAX_DURATION_HOURS} שעות לכל כיוון")
@@ -140,7 +138,6 @@ class FlightScanner:
         stats = self.db.get_summary_stats()
 
         if new_deals:
-            # Retrieve the Top 10 existing cheapest flights from the DB to include in the email
             existing_cheapest = self.db.get_top_cheapest_flights(limit=10)
             print(f"\n📨 שולח מייל מרוכז אחד עם {len(new_deals)} טיסות חדשות + טבלת 10 הטיסות הזולות הקיימות במאגר...")
             self.notifier.send_consolidated_alert(

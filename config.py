@@ -9,17 +9,17 @@ DESTINATION = os.getenv("DESTINATION", "HKT")
 AIRLINE_CODE = os.getenv("AIRLINE_CODE", "EY")  # EY = Etihad Airways
 MAX_DURATION_HOURS = float(os.getenv("MAX_DURATION_HOURS", "15.0"))
 
-# Price Ceiling Filter (Alert only for flights <= this price)
+# Price Ceiling Filter (Strictly <= $1,100)
 MAX_PRICE_USD = float(os.getenv("MAX_PRICE_USD", "1100.0"))
 
 # Stay Duration: 15 to 22 days
 MIN_STAY_DAYS = int(os.getenv("MIN_STAY_DAYS", "15"))
 MAX_STAY_DAYS = int(os.getenv("MAX_STAY_DAYS", "22"))
 
-# Departure window: January 1 up to February 7
+# Return cutoff constraint: Flights cannot return after March 7, 2027
 TARGET_YEAR = int(os.getenv("TARGET_YEAR", "2027"))
 TARGET_MONTHS = [1, 2]
-LATEST_DEPARTURE_DATE = os.getenv("LATEST_DEPARTURE_DATE", f"{TARGET_YEAR}-02-07")
+LATEST_RETURN_DATE = os.getenv("LATEST_RETURN_DATE", f"{TARGET_YEAR}-03-07")
 
 # Step 1 = Every possible day
 DEPARTURE_STEP_DAYS = int(os.getenv("DEPARTURE_STEP_DAYS", "1"))

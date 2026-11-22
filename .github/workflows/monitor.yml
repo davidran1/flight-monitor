@@ -2,8 +2,8 @@ name: ✈️ Etihad Flight Monitor
 
 on:
   schedule:
-    # רץ אוטומטית בענן כל שעתיים (בדקה ה-20 למניעת עומסי שרתים של GitHub)
-    - cron: '20 */2 * * *'
+    # רץ אוטומטית בענן בכל שעה (בדקה ה-15 למניעת עומסי שרתים של תחילת שעה)
+    - cron: '15 * * * *'
   workflow_dispatch: # מאפשר הפעלה ידנית בלחיצת כפתור מ-GitHub
 
 permissions:
@@ -36,7 +36,7 @@ jobs:
           MAX_PRICE_USD: "1100.0"
           MIN_STAY_DAYS: 15
           MAX_STAY_DAYS: 22
-          LATEST_DEPARTURE_DATE: "2027-02-07"
+          LATEST_RETURN_DATE: "2027-03-07"
           TARGET_YEAR: 2027
           DEPARTURE_STEP_DAYS: 1
           STAY_STEP_DAYS: 1
